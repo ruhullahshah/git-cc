@@ -22,19 +22,21 @@ ARGS = {
     'dry_run': 'Prints a list of changesets to be imported',
     'lshistory': 'Prints the raw output of lshistory to be cached for load',
     'load': 'Loads the contents of a previously saved lshistory file',
+    'year': 'Mine history for a specific year'
 }
 
 cache = getCache()
 
-def main(stash=False, dry_run=False, lshistory=False, load=None):
+def main(stash=False, dry_run=False, lshistory=False, load=None, year=None):
+    print "Rebasing with year: ", year
     validateCC()
     if not (stash or dry_run or lshistory):
         checkPristine()
 
-    cc_exec(["update"], errors=False)
+    #cc_exec(["update"], errors=False)
 
     since = getSince()
-    cache.start()
+    #cache.start()
     if load:
         history = open(load, 'r').read().decode(ENCODING)
     else:
@@ -47,6 +49,19 @@ def main(stash=False, dry_run=False, lshistory=False, load=None):
         cs = parseHistory(history)
         cs = reversed(cs)
         cs = mergeHistory(cs)
+
+        history_per_year = None
+        if year:
+            history_per_year = []
+            print "Year specific rebase: ", year
+            for group in cs:
+                commit_year = group.date[:4]
+                if commit_year == year:
+                    history_per_year.append(group)
+
+        if history_per_year:
+            print "Year: ", year, "# Commits: ", len(history_per_year)
+            cs = history_per_year
         if dry_run:
             return printGroups(cs)
         if not len(cs):
@@ -144,8 +159,11 @@ def mergeHistory(changesets):
     return groups
 
 def commit(list):
+    i = 0
     for cs in list:
         cs.commit()
+        i = i + 1
+        print "Committed: ", i, "/", len(list)
 
 def printGroups(groups):
     for cs in groups:
@@ -183,7 +201,7 @@ class Group:
             files.append(file.file)
         for file in self.files:
             file.add(files)
-        cache.write()
+        #cache.write()
         env = os.environ
         user = users.users.get(self.user, self.user)
         env['GIT_AUTHOR_DATE'] = env['GIT_COMMITTER_DATE'] = str(getCommitDate(self.date))
@@ -210,8 +228,8 @@ class Changeset(object):
     def add(self, files):
         self._add(self.file, self.version)
     def _add(self, file, version):
-        if not cache.update(CCFile(file, version)):
-            return
+        #if not cache.update(CCFile(file, version)):
+        #    return
         if [e for e in cfg.getExclude() if fnmatch(file, e)]:
             return
         toFile = path(join(GIT_DIR, file))
@@ -241,7 +259,7 @@ class Uncataloged(Changeset):
                 continue
             if line.startswith('<'):
                 git_exec(['rm', '-r', getFile(line)], errors=False)
-                cache.remove(getFile(line))
+                #cache.remove(getFile(line))
             elif line.startswith('>'):
                 added = getFile(line)
                 cc_added = join(CC_DIR, added)
