@@ -8,6 +8,7 @@ from fnmatch import fnmatch
 from .clearcase import cc
 from .cache import getCache, CCFile
 from re import search
+import subprocess
 
 """
 Things remaining:
@@ -22,16 +23,40 @@ ARGS = {
     'dry_run': 'Prints a list of changesets to be imported',
     'lshistory': 'Prints the raw output of lshistory to be cached for load',
     'load': 'Loads the contents of a previously saved lshistory file',
-    'year': 'Mine history for a specific year'
+    'year': 'Mine history for a specific year',
+    'create_local_cache': 'Gets the missing elements in the cache from clearcase and stores them in the cache',
+    'search_local_cache': 'Searches the local cache for an element before invoking cleartool get'
 }
 
 cache = getCache()
+local_cache = None
+store_in_cache = False
+search_cache = False
+cached_files = {}
 
-def main(stash=False, dry_run=False, lshistory=False, load=None, year=None):
+def main(stash=False, dry_run=False, lshistory=False, load=None, year=None, create_local_cache=False, search_local_cache=False):
+    global local_cache, store_in_cache
+    global search_cache, cached_files
+
     print "Rebasing with year: ", year
     validateCC()
     if not (stash or dry_run or lshistory):
         checkPristine()
+
+
+    if create_local_cache:
+        local_cache = getLocalCache()
+        store_in_cache = True
+        print "Caching enabled. Elements will be cached at: ", local_cache
+
+    if search_local_cache:
+        if local_cache == None:
+            local_cache = getLocalCache()
+        print "Creating an index for cached files"
+        for root, directories, filenames in os.walk(local_cache):
+            for filename in filenames:
+                cached_files[os.path.join(root, filename)] = ''
+        search_cache = True
 
     #cc_exec(["update"], errors=False)
 
@@ -228,6 +253,8 @@ class Changeset(object):
     def add(self, files):
         self._add(self.file, self.version)
     def _add(self, file, version):
+        global local_cache, search_cache
+        global cached_files
         #if not cache.update(CCFile(file, version)):
         #    return
         if [e for e in cfg.getExclude() if fnmatch(file, e)]:
@@ -236,7 +263,42 @@ class Changeset(object):
         mkdirs(toFile)
         removeFile(toFile)
         try:
-            cc_exec(['get','-to', toFile, cc_file(file, version)])
+            '''
+            if we have reached this point, it implies that a 'cleartool get ...' should be fired, but with our modifications,
+            we should first search the cache if the behavior was enabled in the rebase command. The cache search is ~ O(1) & 
+            incase of a cache hit, a local file copy is much cheaper than a network operation initiated by 'cleartool get ...'  
+            '''
+            cache_file_name = file + "_" + self.date
+            if search_cache:
+                if cached_files and local_cache:
+                    candidate = local_cache + "\\" + cache_file_name
+                    if candidate in cached_files.keys():
+                        print "Cache hit: ", candidate
+                        output = subprocess.check_output("cp " + "\"" + candidate + "\" \"" + toFile + "\"", stderr=subprocess.STDOUT, shell=True)
+                        print output
+                    else:
+                        cc_exec(['get', '-to', toFile, cc_file(file, version)])
+                else:
+                    print "Cached files table empty or the local cache location was not loaded correctly. Falling back to cleartool get"
+                    cc_exec(['get', '-to', toFile, cc_file(file, version)])
+            else:
+                cc_exec(['get','-to', toFile, cc_file(file, version)])
+            #in case you want to build up the local cache
+            if store_in_cache:
+                project_dir = file.split("\\")
+                project_dir = project_dir[:-1]
+                project_dir = ("\\").join(project_dir)
+                #Sometimes dir renaming operations in the history can cause the same version to be written twice and we don't want that
+                cache_path = local_cache + "\\" + cache_file_name
+                if not os.path.isfile(cache_path):
+                    if os.path.isdir(local_cache + "\\" + project_dir):
+                        output = subprocess.check_output("cp " + "\"" + file + "\"" + " " + "\"" + local_cache + "\\" + cache_file_name + "\"", stderr=subprocess.STDOUT, shell=True)
+                        print output
+                    else:
+                        output = subprocess.check_output("mkdir " + "\"" + local_cache + "\\" + project_dir + "\"",stderr=subprocess.STDOUT, shell=True)
+                        print output
+                        output = subprocess.check_output("cp " + "\"" + file + "\"" + " " + "\"" + local_cache + "\\" + cache_file_name + "\"", stderr=subprocess.STDOUT, shell=True)
+                        print output
         except:
             if len(file) < 200:
                 raise

@@ -47,6 +47,7 @@ def get_users_module(path):
     return users_module
 
 CFG_CC = 'clearcase'
+CFG_CACHE = 'cache'
 CC_DIR = None
 ENCODING = None
 if hasattr(sys.stdin, 'encoding'):
@@ -217,6 +218,9 @@ def path(path, args='-m'):
         return os.popen('cygpath %s "%s"' %(args, path)).readlines()[0].strip()
     else:
         return path
+
+def getLocalCache():
+    return path(cfg.get(CFG_CACHE))
 
 GIT_DIR = path(gitDir())
 if not exists(join(GIT_DIR, '.git')):
